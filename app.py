@@ -35,6 +35,7 @@ def dashboard():
     env_user = os.getenv("DASHBOARD_USER")
     env_pass = os.getenv("DASHBOARD_PASS")
 
+    # Если авторизация не прошла — возвращаем 401 с заголовком WWW-Authenticate
     if not auth or auth.username != env_user or auth.password != env_pass:
         return Response(
             'Unauthorized', 401,
