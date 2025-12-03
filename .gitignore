@@ -1,0 +1,82 @@
+# ═══════════════════════════════════════════
+# 1. ЛИЧНЫЕ ДАННЫЕ И УВЕДОМЛЕНИЯ (главное!)
+# ═══════════════════════════════════════════
+notifications.json
+leads.json
+relevant_leads.json
+full_capture.json
+invited_users.json
+pending_feedback.json
+started_dialogs.json
+dialog_contexts.json
+training_data.json
+*.db
+*.sqlite3
+data/
+storage/
+logs/
+dialog_logs/
+
+# ═══════════════════════════════════════════
+# 2. Python кэш и мусор
+# ═══════════════════════════════════════════
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ═══════════════════════════════════════════
+# 3. Секреты и конфиги
+# ═══════════════════════════════════════════
+.env
+.env.local
+.env.production
+.env.example
+config.py
+secrets/
+*.pem
+*.key
+*.crt
+
+# ═══════════════════════════════════════════
+# 4. Логи и временные файлы
+# ═══════════════════════════════════════════
+*.log
+monitor.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ═══════════════════════════════════════════
+# 5. IDE / редакторы
+# ═══════════════════════════════════════════
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
+
+# ═══════════════════════════════════════════
+# 6. Render / деплой
+# ═══════════════════════════════════════════
+render.yaml
+render.yml
+Dockerfile
+.dockerignore
+
+# ═══════════════════════════════════════════
+# 7. Если вдруг юзаешь базы или миграции
+# ═══════════════════════════════════════════
+migrations/
+instance/
+*.sqlite3-journal
