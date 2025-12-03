@@ -1,21 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string
-import json
-from datetime import datetime
-import os
-
-app = Flask(__name__)
-notifications_file = 'notifications.json'
-notifications = []
-
-# Загрузи существующие уведомления при старте
-if os.path.exists(notifications_file):
-    with open(notifications_file, 'r', encoding='utf-8') as f:
-        notifications = json.load(f)
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.json
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, Response
 import json
 from datetime import datetime
 import os
@@ -53,7 +36,10 @@ def dashboard():
     env_pass = os.getenv("DASHBOARD_PASS")
 
     if not auth or auth.username != env_user or auth.password != env_pass:
-        return 'Unauthorized', 401
+        return Response(
+            'Unauthorized', 401,
+            {'WWW-Authenticate': 'Basic realm="Login Required"'}
+        )
     
     # HTML-дашборд с списком уведомлений
     html = """
