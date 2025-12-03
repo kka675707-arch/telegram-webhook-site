@@ -96,7 +96,21 @@ def current_session():
         <strong>Текст:</strong> {{ notif.text }}<br>
         <strong>Анализ ИИ:</strong> {{ notif.ai }}<br>
         <strong>Время:</strong> {{ notif.received_at }}<br>
-        <a href="tg://user?id={{ notif.user_id }}">Написать в ЛС</a> | <a href="https://t.me/{{ notif.user_id }}">Открыть профиль</a>
+        {% if notif.chat_id and notif.message_id %}
+          <a href="https://t.me/c/{{ (notif.chat_id|string)[4:] }}/{{ notif.message_id }}" target="_blank" style="font-weight:bold; color:#0088cc;">
+            Открыть сообщение в группе
+          </a>
+        {% else %}
+          <em style="color:#888;">(ссылка на сообщение недоступна)</em>
+        {% endif %}
+        &nbsp;|&nbsp;
+        <a href="tg://user?id={{ notif.user_id }}" style="color:#00aa00;">
+          Написать в ЛС (мобилка/десктоп)
+        </a>
+        &nbsp;|&nbsp;
+        <a href="https://t.me/{{ notif.user_id }}" target="_blank" style="color:#666;">
+          Профиль в вебе
+        </a>
         <hr>
     </li>
     {% endfor %}
@@ -173,7 +187,21 @@ def view_session(session_id):
         <strong>Текст:</strong> {{ notif.text }}<br>
         <strong>Анализ ИИ:</strong> {{ notif.ai }}<br>
         <strong>Время:</strong> {{ notif.received_at }}<br>
-        <a href="tg://user?id={{ notif.user_id }}">Написать в ЛС</a> | <a href="https://t.me/{{ notif.user_id }}">Открыть профиль</a>
+        {% if notif.chat_id and notif.message_id %}
+          <a href="https://t.me/c/{{ (notif.chat_id|string)[4:] }}/{{ notif.message_id }}" target="_blank" style="font-weight:bold; color:#0088cc;">
+            Открыть сообщение в группе
+          </a>
+        {% else %}
+          <em style="color:#888;">(ссылка на сообщение недоступна)</em>
+        {% endif %}
+        &nbsp;|&nbsp;
+        <a href="tg://user?id={{ notif.user_id }}" style="color:#00aa00;">
+          Написать в ЛС (мобилка/десктоп)
+        </a>
+        &nbsp;|&nbsp;
+        <a href="https://t.me/{{ notif.user_id }}" target="_blank" style="color:#666;">
+          Профиль в вебе
+        </a>
         <hr>
     </li>
     {% endfor %}
