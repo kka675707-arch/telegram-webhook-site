@@ -10,7 +10,7 @@ load_dotenv()
 
 app = Flask(__name__)
 notifications_file = 'notifications.json'
-daily_logs_dir = '../clean_telegram_monitor/daily_logs'  # Путь к директории с дневными логами
+daily_logs_dir = 'daily_logs'  # Путь к директории с дневными логами относительно текущей директории
 
 # Загрузи существующие уведомления при старте
 if os.path.exists(notifications_file):
