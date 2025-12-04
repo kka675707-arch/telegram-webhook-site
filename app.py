@@ -1,8 +1,9 @@
-from flask import Flask, request, jsonify, render_template_string, Response, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, Response, redirect, url_for, stream_with_context
 import json
 from datetime import datetime
 import os
 import glob
+import time
 from dotenv import load_dotenv
 
 # Загружаем переменные окружения из .env
@@ -18,6 +19,21 @@ if os.path.exists(notifications_file):
         notifications = json.load(f)
 else:
     notifications = []
+
+def get_today_notifications():
+    """Получает уведомления за сегодня"""
+    today_date = datetime.now().strftime('%Y-%m-%d')
+    log_file = f"{daily_logs_dir}/{today_date}.json"
+    
+    today_notifications = []
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                today_notifications = json.load(f)
+        except Exception as e:
+            print(f"Ошибка чтения файла {log_file}: {e}")
+    
+    return today_notifications
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -69,66 +85,129 @@ def today():
     
     # Получаем сегодняшнюю дату
     today_date = datetime.now().strftime('%Y-%m-%d')
-    log_file = f"{daily_logs_dir}/{today_date}.json"
     
-    # Загружаем данные за сегодня
-    today_notifications = []
-    if os.path.exists(log_file):
-        try:
-            with open(log_file, 'r', encoding='utf-8') as f:
-                today_notifications = json.load(f)
-        except Exception as e:
-            print(f"Ошибка чтения файла {log_file}: {e}")
-    
-    # HTML-дашборд с автообновлением каждые 30 секунд
+    # HTML-дашборд с SSE для реального времени
     html = """
     <html>
     <head>
         <meta charset="UTF-8">
         <title>Текущие уведомления</title>
-        <script>
-            // Автообновление страницы каждые 30 секунд
-            setTimeout(function(){
-                window.location.reload();
-            }, 30000);
-        </script>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .notification { border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px; }
+            .notification strong { color: #333; }
+            .notification hr { margin: 10px 0; }
+            .time { color: #666; font-size: 0.9em; }
+            .sender { color: #0066cc; }
+            .group { color: #cc6600; }
+            .ai-result { color: #009900; }
+            .links a { margin-right: 10px; text-decoration: none; }
+            .links a:hover { text-decoration: underline; }
+            #notifications { margin-top: 20px; }
+            button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        </style>
     </head>
     <body>
         <h1>Уведомления за сегодня (""" + today_date + """)</h1>
-        <p><em>Страница автоматически обновляется каждые 30 секунд</em></p>
+        <p><em>Дашборд обновляется в реальном времени</em></p>
         <button onclick="window.location.href='/'">Назад</button>
-        <ul>
-        {% for notif in notifications %}
-        <li>
-            <strong>Группа:</strong> {{ notif.group }}<br>
-            <strong>Отправитель:</strong> {{ notif.sender }}{% if notif.sender_username %} (@{{ notif.sender_username }}){% endif %} (ID: {{ notif.user_id }})<br>
-            <strong>Текст:</strong> {{ notif.text }}<br>
-            <strong>Анализ ИИ:</strong> {{ notif.ai }}<br>
-            <strong>Время:</strong> {{ notif.received_at }}<br>
-            {% if notif.chat_id and notif.message_id %}
-              <a href="https://t.me/c/{{ (notif.chat_id|string)[4:] }}/{{ notif.message_id }}" target="_blank" style="font-weight:bold; color:#0088cc;">
-                Открыть сообщение в группе
-              </a>
-            {% else %}
-              <em style="color:#888;">(ссылка на сообщение недоступна)</em>
-            {% endif %}
-            &nbsp;|&nbsp;
-            <a href="tg://user?id={{ notif.user_id }}" style="color:#00aa00;">
-              Написать в ЛС (мобилка/десктоп)
-            </a>
-            &nbsp;|&nbsp;
-            <a href="https://t.me/{{ notif.user_id }}" target="_blank" style="color:#666;">
-              Профиль в вебе
-            </a>
-            <hr>
-        </li>
-        {% endfor %}
-        </ul>
-        <p>Всего уведомлений: {{ notifications|length }}</p>
+        <div id="notifications"></div>
+
+        <script>
+            const eventSource = new EventSource('/stream');
+            
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const container = document.getElementById('notifications');
+                
+                // Очищаем контейнер и добавляем уведомления в обратном порядке (новые сверху)
+                container.innerHTML = '';
+                
+                // Добавляем уведомления в обратном порядке (новые сверху)
+                for (let i = data.length - 1; i >= 0; i--) {
+                    const notif = data[i];
+                    
+                    const notifDiv = document.createElement('div');
+                    notifDiv.className = 'notification';
+                    
+                    let senderText = notif.sender;
+                    if (notif.sender_username) {
+                        senderText += ' (@' + notif.sender_username + ')';
+                    }
+                    senderText += ' (ID: ' + notif.user_id + ')';
+                    
+                    let messageLink = '';
+                    if (notif.chat_id && notif.message_id) {
+                        const chatIdStripped = notif.chat_id.toString().substring(4);
+                        messageLink = '<a href="https://t.me/c/' + chatIdStripped + '/' + notif.message_id + '" target="_blank" style="font-weight:bold; color:#0088cc;">Открыть сообщение в группе</a>';
+                    } else {
+                        messageLink = '<em style="color:#888;">(ссылка на сообщение недоступна)</em>';
+                    }
+                    
+                    const profileLink = '<a href="tg://user?id=' + notif.user_id + '" style="color:#00aa00;">Написать в ЛС (мобилка/десктоп)</a>';
+                    const webProfileLink = '<a href="https://t.me/' + notif.user_id + '" target="_blank" style="color:#666;">Профиль в вебе</a>';
+                    
+                    notifDiv.innerHTML = 
+                        '<strong>Группа:</strong> <span class="group">' + notif.group + '</span><br>' +
+                        '<strong>Отправитель:</strong> <span class="sender">' + senderText + '</span><br>' +
+                        '<strong>Текст:</strong> ' + notif.text + '<br>' +
+                        '<strong>Анализ ИИ:</strong> <span class="ai-result">' + notif.ai + '</span><br>' +
+                        '<strong>Время:</strong> <span class="time">' + notif.received_at + '</span><br>' +
+                        '<div class="links">' + messageLink + ' | ' + profileLink + ' | ' + webProfileLink + '</div>' +
+                        '<hr>';
+                    
+                    container.appendChild(notifDiv);
+                }
+                
+                // Обновляем счетчик уведомлений
+                const countParagraph = document.createElement('p');
+                countParagraph.innerHTML = '<strong>Всего уведомлений:</strong> ' + data.length;
+                container.appendChild(countParagraph);
+            };
+            
+            eventSource.onerror = function(event) {
+                console.error('SSE error:', event);
+            };
+        </script>
     </body>
     </html>
     """
-    return render_template_string(html, notifications=today_notifications[::-1])  # Новые сверху
+    return render_template_string(html)
+
+@app.route('/stream')
+def stream():
+    """Server-Sent Events endpoint for real-time updates"""
+    auth = request.authorization
+    env_user = os.getenv("DASHBOARD_USER")
+    env_pass = os.getenv("DASHBOARD_PASS")
+
+    # Если авторизация не прошла — возвращаем 401 с заголовком WWW-Authenticate
+    if not auth or auth.username != env_user or auth.password != env_pass:
+        return Response(
+            'Unauthorized', 401,
+            {'WWW-Authenticate': 'Basic realm="Login Required"'}
+        )
+    
+    def event_stream():
+        prev_notifications = []
+        while True:
+            try:
+                current_notifications = get_today_notifications()
+                
+                # Проверяем, изменились ли уведомления
+                if current_notifications != prev_notifications:
+                    # Отправляем обновленный список уведомлений
+                    yield f"data: {json.dumps(current_notifications, ensure_ascii=False)}\n\n"
+                    prev_notifications = current_notifications
+                
+                # Ждем 1 секунду перед следующей проверкой
+                time.sleep(1)
+            except Exception as e:
+                print(f"Error in event stream: {e}")
+                yield f"data: []\n\n"
+                time.sleep(5)
+    
+    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route('/previous_days', methods=['GET'])
 def previous_days():
@@ -208,40 +287,70 @@ def view_day(date_str):
         except Exception as e:
             return f"Ошибка чтения файла: {e}", 500
     
-    # HTML-дашборд с информацией за день
+    # HTML-дашборд с информацией за день (статический, без SSE)
     html = """
-    <h1>Лог за {{ date }}</h1>
-    <button onclick="window.location.href='/previous_days'">Назад</button>
-    <ul>
-    {% for notif in notifications %}
-    <li>
-        <strong>Группа:</strong> {{ notif.group }}<br>
-        <strong>Отправитель:</strong> {{ notif.sender }}{% if notif.sender_username %} (@{{ notif.sender_username }}){% endif %} (ID: {{ notif.user_id }})<br>
-        <strong>Текст:</strong> {{ notif.text }}<br>
-        <strong>Анализ ИИ:</strong> {{ notif.ai }}<br>
-        <strong>Время:</strong> {{ notif.received_at }}<br>
-        {% if notif.chat_id and notif.message_id %}
-          <a href="https://t.me/c/{{ (notif.chat_id|string)[4:] }}/{{ notif.message_id }}" target="_blank" style="font-weight:bold; color:#0088cc;">
-            Открыть сообщение в группе
-          </a>
-        {% else %}
-          <em style="color:#888;">(ссылка на сообщение недоступна)</em>
-        {% endif %}
-        &nbsp;|&nbsp;
-        <a href="tg://user?id={{ notif.user_id }}" style="color:#00aa00;">
-          Написать в ЛС (мобилка/десктоп)
-        </a>
-        &nbsp;|&nbsp;
-        <a href="https://t.me/{{ notif.user_id }}" target="_blank" style="color:#666;">
-          Профиль в вебе
-        </a>
-        <hr>
-    </li>
-    {% endfor %}
-    </ul>
-    <p>Всего уведомлений: {{ notifications|length }}</p>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Лог за """ + date_str + """</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .notification { border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px; }
+            .notification strong { color: #333; }
+            .notification hr { margin: 10px 0; }
+            .time { color: #666; font-size: 0.9em; }
+            .sender { color: #0066cc; }
+            .group { color: #cc6600; }
+            .ai-result { color: #009900; }
+            .links a { margin-right: 10px; text-decoration: none; }
+            .links a:hover { text-decoration: underline; }
+            #notifications { margin-top: 20px; }
+            button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        </style>
+    </head>
+    <body>
+        <h1>Лог за """ + date_str + """</h1>
+        <button onclick="window.location.href='/previous_days'">Назад</button>
+        <div id="notifications">
     """
-    return render_template_string(html, date=date_str, notifications=day_notifications[::-1])  # Новые сверху
+    
+    # Добавляем уведомления в обратном порядке (новые сверху)
+    for notif in reversed(day_notifications):
+        sender_text = notif['sender']
+        if 'sender_username' in notif and notif['sender_username']:
+            sender_text += ' (@' + notif['sender_username'] + ')'
+        sender_text += ' (ID: ' + str(notif['user_id']) + ')'
+        
+        message_link = ''
+        if 'chat_id' in notif and 'message_id' in notif and notif['chat_id'] and notif['message_id']:
+            chat_id_stripped = str(notif['chat_id'])[4:] if str(notif['chat_id']).startswith('-100') else notif['chat_id']
+            message_link = f'<a href="https://t.me/c/{chat_id_stripped}/{notif["message_id"]}" target="_blank" style="font-weight:bold; color:#0088cc;">Открыть сообщение в группе</a>'
+        else:
+            message_link = '<em style="color:#888;">(ссылка на сообщение недоступна)</em>'
+        
+        profile_link = f'<a href="tg://user?id={notif["user_id"]}" style="color:#00aa00;">Написать в ЛС (мобилка/десктоп)</a>'
+        web_profile_link = f'<a href="https://t.me/{notif["user_id"]}" target="_blank" style="color:#666;">Профиль в вебе</a>'
+        
+        html += f'''
+        <div class="notification">
+            <strong>Группа:</strong> <span class="group">{notif['group']}</span><br>
+            <strong>Отправитель:</strong> <span class="sender">{sender_text}</span><br>
+            <strong>Текст:</strong> {notif['text']}<br>
+            <strong>Анализ ИИ:</strong> <span class="ai-result">{notif['ai']}</span><br>
+            <strong>Время:</strong> <span class="time">{notif['received_at']}</span><br>
+            <div class="links">{message_link} | {profile_link} | {web_profile_link}</div>
+            <hr>
+        </div>
+        '''
+    
+    html += f'''
+        </div>
+        <p><strong>Всего уведомлений:</strong> {len(day_notifications)}</p>
+    </body>
+    </html>
+    '''
+    
+    return html
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
