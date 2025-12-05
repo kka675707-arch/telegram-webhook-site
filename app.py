@@ -10,42 +10,36 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-notifications_file = 'notifications.json'
-daily_logs_dir = 'daily_logs'  # Путь к директории с дневными логами относительно текущей директории
 
-# Загрузи существующие уведомления при старте
-if os.path.exists(notifications_file):
-    with open(notifications_file, 'r', encoding='utf-8') as f:
-        notifications = json.load(f)
-else:
-    notifications = []
-
-def get_today_notifications():
-    """Получает уведомления за сегодня"""
-    today_date = datetime.now().strftime('%Y-%m-%d')
-    log_file = f"{daily_logs_dir}/{today_date}.json"
-    
-    today_notifications = []
-    if os.path.exists(log_file):
-        try:
-            with open(log_file, 'r', encoding='utf-8') as f:
-                today_notifications = json.load(f)
-        except Exception as e:
-            print(f"Ошибка чтения файла {log_file}: {e}")
-    
-    return today_notifications
+# Храним все уведомления в памяти вместо файлов
+notifications = []
+clients = []  # Для Server-Sent Events
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    """Принимает пакеты сообщений от бота и сохраняет их в памяти"""
     data = request.json
     if not data:
         return jsonify({'error': 'No JSON data'}), 400
-    data['received_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    notifications.append(data)
-    # Сохрани в файл (для перезапуска)
-    with open(notifications_file, 'w', encoding='utf-8') as f:
-        json.dump(notifications, f, ensure_ascii=False, indent=2)
-    return jsonify({'status': 'ok', 'id': len(notifications) - 1})
+    
+    # Если это пакет сообщений
+    if 'messages' in data:
+        messages = data['messages']
+        batch_sent_at = data.get('batch_sent_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        
+        # Добавляем все сообщения из пакета
+        for msg in messages:
+            msg['received_at'] = batch_sent_at
+            notifications.append(msg)
+        
+        print(f"Получен пакет из {len(messages)} сообщений")
+        return jsonify({'status': 'ok', 'count': len(messages)})
+    else:
+        # Одиночное сообщение (для совместимости)
+        data['received_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        notifications.append(data)
+        print("Получено одиночное сообщение")
+        return jsonify({'status': 'ok'})
 
 @app.route('/', methods=['GET'])
 def index():
@@ -189,23 +183,28 @@ def stream():
         )
     
     def event_stream():
-        prev_notifications = []
-        while True:
-            try:
-                current_notifications = get_today_notifications()
-                
-                # Проверяем, изменились ли уведомления
-                if current_notifications != prev_notifications:
-                    # Отправляем обновленный список уведомлений
-                    yield f"data: {json.dumps(current_notifications, ensure_ascii=False)}\n\n"
-                    prev_notifications = current_notifications
-                
-                # Ждем 1 секунду перед следующей проверкой
-                time.sleep(1)
-            except Exception as e:
-                print(f"Error in event stream: {e}")
-                yield f"data: []\n\n"
-                time.sleep(5)
+        client_id = len(clients)
+        clients.append(True)  # Добавляем клиента в список
+        last_count = 0
+        
+        try:
+            while clients[client_id]:  # Пока клиент активен
+                try:
+                    # Отправляем уведомления только если их количество изменилось
+                    if len(notifications) != last_count:
+                        yield f"data: {json.dumps(notifications, ensure_ascii=False)}\n\n"
+                        last_count = len(notifications)
+                    
+                    # Ждем 1 секунду перед следующей проверкой
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"Error in event stream: {e}")
+                    yield f"data: []\n\n"
+                    time.sleep(5)
+        finally:
+            # Удаляем клиента из списка при отключении
+            if client_id < len(clients):
+                clients[client_id] = False
     
     return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
@@ -223,22 +222,10 @@ def previous_days():
             {'WWW-Authenticate': 'Basic realm="Login Required"'}
         )
     
-    # Получаем список файлов логов
-    log_files = glob.glob(f"{daily_logs_dir}/*.json")
-    log_dates = []
-    
-    for log_file in log_files:
-        filename = os.path.basename(log_file)
-        date_str = filename.replace('.json', '')
-        try:
-            # Проверяем, что имя файла соответствует формату даты
-            datetime.strptime(date_str, '%Y-%m-%d')
-            log_dates.append(date_str)
-        except ValueError:
-            pass  # Пропускаем файлы с неправильным форматом имени
-    
-    # Сортируем даты по убыванию
-    log_dates.sort(reverse=True)
+    # Так как теперь всё хранится в памяти, показываем только сегодняшние уведомления
+    # Но для совместимости создаем список с одной датой
+    today_date = datetime.now().strftime('%Y-%m-%d')
+    log_dates = [today_date]
     
     # HTML-список предыдущих дней
     html = """
@@ -276,16 +263,8 @@ def view_day(date_str):
     except ValueError:
         return "Неправильный формат даты", 400
     
-    # Загружаем данные за указанный день
-    log_file = f"{daily_logs_dir}/{date_str}.json"
-    day_notifications = []
-    
-    if os.path.exists(log_file):
-        try:
-            with open(log_file, 'r', encoding='utf-8') as f:
-                day_notifications = json.load(f)
-        except Exception as e:
-            return f"Ошибка чтения файла: {e}", 500
+    # Для совместимости показываем все уведомления (так как теперь всё в памяти)
+    day_notifications = notifications
     
     # HTML-дашборд с информацией за день (статический, без SSE)
     html = """
